@@ -1,7 +1,6 @@
 package frc.robot.subsystems;
 
 import com.revrobotics.CANSparkMax;
-import com.revrobotics.MotorFeedbackSensor;
 import com.revrobotics.CANSparkMax.ControlType;
 import com.revrobotics.CANSparkMaxLowLevel.MotorType;
 import com.revrobotics.SparkMaxAbsoluteEncoder.Type;
@@ -91,6 +90,8 @@ public class SwerveDriveTrain implements Subsystem {
         var rr_angle = Math.atan2(rr_str, rr_fwd);
 
         // TODO - normalize speeds s.t. we're not commanding >100% output
+        // TODO - don't change steering angle when computed speed is 0 - Math.atan2 will snap the angle back to 0 when both inputs are zero
+        // TODO - implement wraparound to minimize wheel direction changes
 
         FLDrive.set(fl_speed);
         // TODO - assumes angle in radians?
