@@ -9,7 +9,7 @@ import edu.wpi.first.wpilibj2.command.Subsystem;
 
 public class SwerveDriveTrain implements Subsystem {
 
-    public static double WHEEL_BASE_INCHES = 24;
+    public static double WHEEL_BASE_INCHES = 18;
     public static double TRACK_WIDTH_INCHES = 24;
 
     public static double L = WHEEL_BASE_INCHES /2;
@@ -61,8 +61,11 @@ public class SwerveDriveTrain implements Subsystem {
     }
 
     public void periodic(){
-        var rcw_fwd = rcw * (L/R);
-        var rcw_str = rcw * (W/R);
+        // When the robot is all width, L = 0, W = R -> rcw points straight back
+        var rcw_fwd = rcw * (W/R);
+        // When the robot is all length, L = R, W = 0 -> rcw points straight right
+
+        var rcw_str = rcw * (L/R);
         
         // Front Left
         var fl_fwd = fwd + rcw_fwd;
