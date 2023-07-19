@@ -111,6 +111,5 @@ public class SwerveDriveTrain implements Subsystem {
         RRDrive.set(rr_speed);
         // TODO - assumes angle in radians?
         RRSteer.getPIDController().setReference(rr_angle, ControlType.kPosition);
-
     }
 }
