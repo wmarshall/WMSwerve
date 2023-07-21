@@ -1,5 +1,7 @@
 package frc.robot.subsystems;
 
+import java.util.List;
+
 import com.revrobotics.CANSparkMax;
 import com.revrobotics.CANSparkMax.ControlType;
 import com.revrobotics.CANSparkMaxLowLevel.MotorType;
@@ -12,9 +14,9 @@ public class SwerveDriveTrain implements Subsystem {
     public static double WHEEL_BASE_INCHES = 18;
     public static double TRACK_WIDTH_INCHES = 24;
 
-    public static double L = WHEEL_BASE_INCHES /2;
-    public static double W = TRACK_WIDTH_INCHES /2;
-    public static double R = Math.sqrt(L*L + W*W);
+    public static double L = WHEEL_BASE_INCHES / 2;
+    public static double W = TRACK_WIDTH_INCHES / 2;
+    public static double R = Math.sqrt(L * L + W * W);
 
     private final CANSparkMax FLDrive, FLSteer;
     private final CANSparkMax FRDrive, FRSteer;
@@ -42,7 +44,7 @@ public class SwerveDriveTrain implements Subsystem {
 
         return steer;
     }
-    
+
     public SwerveDriveTrain() {
         FLDrive = new CANSparkMax(0, MotorType.kBrushless);
         FLSteer = steerFactory(1);
@@ -60,46 +62,53 @@ public class SwerveDriveTrain implements Subsystem {
         this.rcw = rcw;
     }
 
-    public void periodic(){
+    public void periodic() {
         // When the robot is all width, L = 0, W = R -> rcw points straight back
-        var rcw_fwd = rcw * (W/R);
+        var rcw_fwd = rcw * (W / R);
         // When the robot is all length, L = R, W = 0 -> rcw points straight right
+        var rcw_str = rcw * (L / R);
 
-        var rcw_str = rcw * (L/R);
-        
         // Front Left
         var fl_fwd = fwd + rcw_fwd;
         var fl_str = str + rcw_str;
         // Assumes instantaneous angle correction - may cause lurch in wrong direction
-        var fl_speed = Math.sqrt(fl_fwd*fl_fwd + fl_str*fl_str);
+        var fl_speed = Math.sqrt(fl_fwd * fl_fwd + fl_str * fl_str);
         var fl_angle = Math.atan2(fl_str, fl_fwd);
         // Front Right
         var fr_fwd = fwd - rcw_fwd;
         var fr_str = str + rcw_str;
         // Assumes instantaneous angle correction - may cause lurch in wrong direction
-        var fr_speed = Math.sqrt(fr_fwd*fr_fwd + fr_str*fr_str);
+        var fr_speed = Math.sqrt(fr_fwd * fr_fwd + fr_str * fr_str);
         var fr_angle = Math.atan2(fr_str, fr_fwd);
         // Rear Left
         var rl_fwd = fwd + rcw_fwd;
         var rl_str = str - rcw_str;
         // Assumes instantaneous angle correction - may cause lurch in wrong direction
-        var rl_speed = Math.sqrt(rl_fwd*rl_fwd + rl_str*rl_str);
+        var rl_speed = Math.sqrt(rl_fwd * rl_fwd + rl_str * rl_str);
         var rl_angle = Math.atan2(rl_str, rl_fwd);
         // Rear Right
         var rr_fwd = fwd - rcw_fwd;
         var rr_str = str - rcw_str;
         // Assumes instantaneous angle correction - may cause lurch in wrong direction
-        var rr_speed = Math.sqrt(rr_fwd*rr_fwd + rr_str*rr_str);
+        var rr_speed = Math.sqrt(rr_fwd * rr_fwd + rr_str * rr_str);
         var rr_angle = Math.atan2(rr_str, rr_fwd);
 
-        // TODO - normalize speeds s.t. we're not commanding >100% output
-        // TODO - don't change steering angle when computed speed is 0 - Math.atan2 will snap the angle back to 0 when both inputs are zero
+        var max_output = List.of(fl_speed, fr_speed, rl_speed, rr_speed).stream().max((a, b) -> (int) (a - b))
+                .orElse(1.0);
+        if (max_output > 1) {
+            fl_speed /= max_output;
+            fr_speed /= max_output;
+            rl_speed /= max_output;
+            rr_speed /= max_output;
+        }
+        //
+        // TODO - don't change steering angle when computed speed is 0 - Math.atan2 will
+        // snap the angle back to 0 when both inputs are zero
         // TODO - implement wraparound to minimize wheel direction changes
 
         FLDrive.set(fl_speed);
         // TODO - assumes angle in radians?
-        FLSteer.getPIDController().setReference(fl_angle, ControlType.kPosition);
-        
+
         FRDrive.set(fr_speed);
         // TODO - assumes angle in radians?
         FRSteer.getPIDController().setReference(fr_angle, ControlType.kPosition);
