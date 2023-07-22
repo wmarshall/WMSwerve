@@ -6,6 +6,7 @@ import com.revrobotics.CANSparkMax;
 import com.revrobotics.CANSparkMax.ControlType;
 import com.revrobotics.CANSparkMaxLowLevel.MotorType;
 import com.revrobotics.SparkMaxAbsoluteEncoder.Type;
+import frc.robot.Util;
 
 import edu.wpi.first.wpilibj2.command.Subsystem;
 
@@ -29,18 +30,26 @@ public class SwerveDriveTrain implements Subsystem {
         var steer = new CANSparkMax(deviceID, MotorType.kBrushless);
         // Assume NEO550
         steer.setSmartCurrentLimit(30);
-        var encoder = steer.getAbsoluteEncoder(Type.kDutyCycle);
+        var heading_encoder = steer.getAbsoluteEncoder(Type.kDutyCycle);
+        var motor_encoder = steer.getEncoder();
+        // Heading in degrees, 0 is "north"
+        Util.handleREVLibErr(heading_encoder.setPositionConversionFactor(360));
+        Util.handleREVLibErr(motor_encoder.setPositionConversionFactor(360));
+
         // TODO - persistent offsets
-        encoder.setZeroOffset(0);
+        Util.handleREVLibErr(heading_encoder.setZeroOffset(0));
+        Util.handleREVLibErr(motor_encoder.setPosition(heading_encoder.getPosition()));
 
         // Configire PID
         var controller = steer.getPIDController();
-        controller.setFeedbackDevice(encoder);
-        controller.setPositionPIDWrappingEnabled(true);
-        // TODO - what units is this operating in
-        controller.setP(1);
+        Util.handleREVLibErr(controller.setFeedbackDevice(heading_encoder));
+        Util.handleREVLibErr(controller.setPositionPIDWrappingEnabled(true));
+        Util.handleREVLibErr(controller.setPositionPIDWrappingMinInput(-180));
+        Util.handleREVLibErr(controller.setPositionPIDWrappingMaxInput(180));
+        // In units of output fraction (-1, 1) per degree of error
+        Util.handleREVLibErr(controller.setP(0.05));
         // Enable the controller
-        controller.setReference(0, ControlType.kPosition);
+        Util.handleREVLibErr(controller.setReference(0, ControlType.kPosition));
 
         return steer;
     }
@@ -73,25 +82,25 @@ public class SwerveDriveTrain implements Subsystem {
         var fl_str = str + rcw_str;
         // Assumes instantaneous angle correction - may cause lurch in wrong direction
         var fl_speed = Math.sqrt(fl_fwd * fl_fwd + fl_str * fl_str);
-        var fl_angle = Math.atan2(fl_str, fl_fwd);
+        var fl_angle = Math.toDegrees(Math.atan2(fl_str, fl_fwd));
         // Front Right
         var fr_fwd = fwd - rcw_fwd;
         var fr_str = str + rcw_str;
         // Assumes instantaneous angle correction - may cause lurch in wrong direction
         var fr_speed = Math.sqrt(fr_fwd * fr_fwd + fr_str * fr_str);
-        var fr_angle = Math.atan2(fr_str, fr_fwd);
+        var fr_angle = Math.toDegrees(Math.atan2(fr_str, fr_fwd));
         // Rear Left
         var rl_fwd = fwd + rcw_fwd;
         var rl_str = str - rcw_str;
         // Assumes instantaneous angle correction - may cause lurch in wrong direction
         var rl_speed = Math.sqrt(rl_fwd * rl_fwd + rl_str * rl_str);
-        var rl_angle = Math.atan2(rl_str, rl_fwd);
+        var rl_angle = Math.toDegrees(Math.atan2(rl_str, rl_fwd));
         // Rear Right
         var rr_fwd = fwd - rcw_fwd;
         var rr_str = str - rcw_str;
         // Assumes instantaneous angle correction - may cause lurch in wrong direction
         var rr_speed = Math.sqrt(rr_fwd * rr_fwd + rr_str * rr_str);
-        var rr_angle = Math.atan2(rr_str, rr_fwd);
+        var rr_angle = Math.toDegrees(Math.atan2(rr_str, rr_fwd));
 
         var max_output = List.of(fl_speed, fr_speed, rl_speed, rr_speed).stream().max((a, b) -> (int) (a - b))
                 .orElse(1.0);
@@ -106,19 +115,17 @@ public class SwerveDriveTrain implements Subsystem {
         // snap the angle back to 0 when both inputs are zero
         // TODO - implement wraparound to minimize wheel direction changes
 
-        FLDrive.set(fl_speed);
-        // TODO - assumes angle in radians?
+        // Use this incredibly long formulation of setting duty cycle so that we can see errors from the sparkmaxen
+        Util.handleREVLibErr(FLDrive.getPIDController().setReference(fl_speed, ControlType.kDutyCycle));
+        Util.handleREVLibErr(FLSteer.getPIDController().setReference(fl_angle, ControlType.kPosition));
 
-        FRDrive.set(fr_speed);
-        // TODO - assumes angle in radians?
-        FRSteer.getPIDController().setReference(fr_angle, ControlType.kPosition);
+        Util.handleREVLibErr(FRDrive.getPIDController().setReference(fr_speed, ControlType.kDutyCycle));
+        Util.handleREVLibErr(FRSteer.getPIDController().setReference(fr_angle, ControlType.kPosition));
 
-        RLDrive.set(rl_speed);
-        // TODO - assumes angle in radians?
-        RLSteer.getPIDController().setReference(rl_angle, ControlType.kPosition);
+        Util.handleREVLibErr(RLDrive.getPIDController().setReference(rl_speed, ControlType.kDutyCycle));
+        Util.handleREVLibErr(RLSteer.getPIDController().setReference(rl_angle, ControlType.kPosition));
 
-        RRDrive.set(rr_speed);
-        // TODO - assumes angle in radians?
-        RRSteer.getPIDController().setReference(rr_angle, ControlType.kPosition);
+        Util.handleREVLibErr(RRDrive.getPIDController().setReference(rr_speed, ControlType.kDutyCycle));
+        Util.handleREVLibErr(RRSteer.getPIDController().setReference(rr_angle, ControlType.kPosition));
     }
 }
