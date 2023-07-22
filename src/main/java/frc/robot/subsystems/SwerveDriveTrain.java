@@ -65,6 +65,7 @@ public class SwerveDriveTrain implements Subsystem {
         RRSteer = steerFactory(7);
     }
 
+    // TODO: Should this be implemented as a command factory?
     public void setDesired(double fwd, double str, double rcw) {
         this.fwd = fwd;
         this.str = str;
@@ -110,22 +111,36 @@ public class SwerveDriveTrain implements Subsystem {
             rl_speed /= max_output;
             rr_speed /= max_output;
         }
-        //
-        // TODO - don't change steering angle when computed speed is 0 - Math.atan2 will
-        // snap the angle back to 0 when both inputs are zero
+
+        Util.handleREVLibErr(FLDrive.getPIDController().setReference(fl_speed, ControlType.kDutyCycle));
+        Util.handleREVLibErr(FRDrive.getPIDController().setReference(fr_speed, ControlType.kDutyCycle));
+        Util.handleREVLibErr(RLDrive.getPIDController().setReference(rl_speed, ControlType.kDutyCycle));
+        Util.handleREVLibErr(RRDrive.getPIDController().setReference(rr_speed, ControlType.kDutyCycle));
+
+        // Don't change steering angle when computed speed is 0 - Math.atan2 will
+        // snap the angle back to 0 when both inputs are zero. Some people prefer to
+        // employ this logic when commanded drive speed is close to zero, I'm of the
+        // thought that deadbanding should happen on the input side only, not output.
+        if(fl_speed == 0) {
+            fl_angle = FLSteer.getEncoder().getPosition();
+        }
+        if(fr_speed == 0) {
+            fr_angle = FRSteer.getEncoder().getPosition();
+        }
+        if(rl_speed == 0) {
+            rl_angle = RLSteer.getEncoder().getPosition();
+        }
+        if(rr_speed == 0) {
+            rr_angle = RRSteer.getEncoder().getPosition();
+        }
+
         // TODO - implement wraparound to minimize wheel direction changes
 
-        // Use this incredibly long formulation of setting duty cycle so that we can see errors from the sparkmaxen
-        Util.handleREVLibErr(FLDrive.getPIDController().setReference(fl_speed, ControlType.kDutyCycle));
+        // Use this incredibly long formulation of setting duty cycle so that we can see
+        // errors from the sparkmaxen
         Util.handleREVLibErr(FLSteer.getPIDController().setReference(fl_angle, ControlType.kPosition));
-
-        Util.handleREVLibErr(FRDrive.getPIDController().setReference(fr_speed, ControlType.kDutyCycle));
         Util.handleREVLibErr(FRSteer.getPIDController().setReference(fr_angle, ControlType.kPosition));
-
-        Util.handleREVLibErr(RLDrive.getPIDController().setReference(rl_speed, ControlType.kDutyCycle));
         Util.handleREVLibErr(RLSteer.getPIDController().setReference(rl_angle, ControlType.kPosition));
-
-        Util.handleREVLibErr(RRDrive.getPIDController().setReference(rr_speed, ControlType.kDutyCycle));
         Util.handleREVLibErr(RRSteer.getPIDController().setReference(rr_angle, ControlType.kPosition));
     }
 }
