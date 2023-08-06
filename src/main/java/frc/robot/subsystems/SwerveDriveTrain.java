@@ -77,39 +77,17 @@ public class SwerveDriveTrain implements Subsystem {
 
         // The duty cycle encoder now reports the heading of the module in range [0,
         // 360)
-        // inputModulus allows us to convert that to [-180, 180), with 0 still as
-        // "north"
-        var true_heading = MathUtil.inputModulus(heading_encoder.getPosition(), -180, 180);
 
-        // We use the absolute encoder for seeding but the relative encoder for control:
-        // - this allows us to survive the absolute encoder becoming unplugged during
-        // the match,
-        // - as well as have higher control resolution (1024 CPR on the absolute
-        // encoder, 42*STEERING_MOTOR_REDUCTION ~=1949 CPR for the relative)
-        // - the relative encoder is able to report negative readings w/o us needing to
-        // do any trickery here
-        // - This approach may introduce backlash concerns, but we'll leave that for
-        // experimental determination
-        var motor_encoder = steer.getEncoder();
-        motor_encoder.setInverted(relativeEncoderInverted);
-        // Rotations -> degrees, RPM -> degrees per second
-        Util.handleREVLibErr(motor_encoder.setPositionConversionFactor(1 / (360.0 * STEERING_MOTOR_REDUCTION)));
-        Util.handleREVLibErr(
-                motor_encoder.setPositionConversionFactor(motor_encoder.getPositionConversionFactor() / 60));
-
-        // Seed the relative encoder with the true heading
-        Util.handleREVLibErr(motor_encoder.setPosition(true_heading));
-
-        // Configire PID
+        // Configure PID
         var controller = steer.getPIDController();
-        Util.handleREVLibErr(controller.setFeedbackDevice(motor_encoder));
+        Util.handleREVLibErr(controller.setFeedbackDevice(heading_encoder));
         Util.handleREVLibErr(controller.setPositionPIDWrappingEnabled(true));
-        Util.handleREVLibErr(controller.setPositionPIDWrappingMinInput(-180));
-        Util.handleREVLibErr(controller.setPositionPIDWrappingMaxInput(180));
+        Util.handleREVLibErr(controller.setPositionPIDWrappingMinInput(0));
+        Util.handleREVLibErr(controller.setPositionPIDWrappingMaxInput(360));
         // In units of output fraction [-1, 1] per degree of error
         Util.handleREVLibErr(controller.setP(0.05));
         // Enable the controller
-        Util.handleREVLibErr(controller.setReference(motor_encoder.getPosition(), ControlType.kPosition));
+        Util.handleREVLibErr(controller.setReference(heading_encoder.getPosition(), ControlType.kPosition));
 
         return steer;
     }
@@ -118,12 +96,11 @@ public class SwerveDriveTrain implements Subsystem {
         /*
          * The zeroing jig provided with MaxSwerve orients each module to:
          * 
-         * |------------|
-         * |---- ^ |
-         * \ | |
-         * \ | |
-         * \ |
-         * \----|
+         * Please don't squish my art VSCode
+         * |--
+         *  ^ |
+         *  | |
+         *  --|
          * 
          * Where the arrow indicates the wheel direction.
          * When applied to all 4 modules though, this gives:
@@ -173,6 +150,21 @@ public class SwerveDriveTrain implements Subsystem {
                 false,
                 false,
                 false);
+    }
+
+    /*
+     * Change an angle from [0, 360) to [-180, 180), wrapping input angles above 180 around to negatives
+     */
+    private double sparkMaxAngleToNormal(double sparkMaxAngle) {
+        return MathUtil.inputModulus(sparkMaxAngle, -180, 180);
+    }
+/*
+     * Change an angle from [-180, 180) to [0, 360), wrapping negative input angles around.
+     * 
+     * With setPositionPIDWrappingEnabled, sparkmaxes do this automatically for every setpoint < 0
+     */
+    private double normalAngleToSparkMax(double normalAngle) {
+        return MathUtil.inputModulus(normalAngle, 0, 360);
     }
 
     // TODO: Should this be implemented as a command factory?
@@ -234,22 +226,22 @@ public class SwerveDriveTrain implements Subsystem {
         // employ this logic when commanded drive speed is close to zero, I'm of the
         // thought that deadbanding should happen on the input side only, not output.
         if (fl_speed == 0) {
-            fl_angle = FLSteer.getEncoder().getPosition();
+            fl_angle = sparkMaxAngleToNormal(FLSteer.getEncoder().getPosition());
         }
         if (fr_speed == 0) {
-            fr_angle = FRSteer.getEncoder().getPosition();
+            fr_angle = sparkMaxAngleToNormal(FRSteer.getEncoder().getPosition());
         }
         if (rl_speed == 0) {
-            rl_angle = RLSteer.getEncoder().getPosition();
+            rl_angle = sparkMaxAngleToNormal(RLSteer.getEncoder().getPosition());
         }
         if (rr_speed == 0) {
-            rr_angle = RRSteer.getEncoder().getPosition();
+            rr_angle = sparkMaxAngleToNormal(RRSteer.getEncoder().getPosition());
         }
 
         // TODO - implement wraparound to minimize wheel direction changes
-        Util.handleREVLibErr(FLSteer.getPIDController().setReference(fl_angle, ControlType.kPosition));
-        Util.handleREVLibErr(FRSteer.getPIDController().setReference(fr_angle, ControlType.kPosition));
-        Util.handleREVLibErr(RLSteer.getPIDController().setReference(rl_angle, ControlType.kPosition));
-        Util.handleREVLibErr(RRSteer.getPIDController().setReference(rr_angle, ControlType.kPosition));
+        Util.handleREVLibErr(FLSteer.getPIDController().setReference(normalAngleToSparkMax(fl_angle), ControlType.kPosition));
+        Util.handleREVLibErr(FRSteer.getPIDController().setReference(normalAngleToSparkMax(fr_angle), ControlType.kPosition));
+        Util.handleREVLibErr(RLSteer.getPIDController().setReference(normalAngleToSparkMax(rl_angle), ControlType.kPosition));
+        Util.handleREVLibErr(RRSteer.getPIDController().setReference(normalAngleToSparkMax(rr_angle), ControlType.kPosition));
     }
 }
