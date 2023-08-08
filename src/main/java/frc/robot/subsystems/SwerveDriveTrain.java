@@ -95,7 +95,7 @@ public class SwerveDriveTrain implements Subsystem {
         // Rotations -> degrees, RPM -> degrees per second
         Util.handleREVLibErr(motor_encoder.setPositionConversionFactor(1 / (360.0 * STEERING_MOTOR_REDUCTION)));
         Util.handleREVLibErr(
-                motor_encoder.setPositionConversionFactor(motor_encoder.getPositionConversionFactor() / 60));
+                motor_encoder.setVelocityConversionFactor(motor_encoder.getPositionConversionFactor() / 60));
 
         // Seed the relative encoder with the true heading
         Util.handleREVLibErr(motor_encoder.setPosition(true_heading));
