@@ -57,7 +57,7 @@ public class SwerveDriveTrain implements Subsystem {
 
         steer.setInverted(motorInverted);
         // Assume NEO550, don't smoke the poor motor
-        steer.setSmartCurrentLimit(30);
+        Util.handleREVLibErr(steer.setSmartCurrentLimit(30));
 
         // The duty cycle encoder's native units are [0, 1) rotations
         // We want to scale to degrees, then apply the known degree offset, then seed
