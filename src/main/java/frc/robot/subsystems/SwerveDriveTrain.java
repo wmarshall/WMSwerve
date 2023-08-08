@@ -96,11 +96,12 @@ public class SwerveDriveTrain implements Subsystem {
         /*
          * The zeroing jig provided with MaxSwerve orients each module to:
          * 
-         * Please don't squish my art VSCode
-         * |--
-         *  ^ |
-         *  | |
-         *  --|
+         * |------------|
+         * |----....^...|
+         * .....\...|...|
+         * ......\..|...|
+         * .......\.....|
+         * ........\----|
          * 
          * Where the arrow indicates the wheel direction.
          * When applied to all 4 modules though, this gives:
