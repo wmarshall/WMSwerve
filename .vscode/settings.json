@@ -25,5 +25,6 @@
       }
     },
   ],
-  "java.test.defaultConfig": "WPIlibUnitTests"
+  "java.test.defaultConfig": "WPIlibUnitTests",
+  "editor.rulers": [80, 88, 96],
 }
