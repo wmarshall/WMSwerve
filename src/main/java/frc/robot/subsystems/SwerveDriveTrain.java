@@ -1,255 +1,292 @@
 package frc.robot.subsystems;
 
-import java.util.List;
+import java.util.function.Supplier;
 
 import com.revrobotics.CANSparkMax;
 import com.revrobotics.CANSparkMax.ControlType;
+import com.revrobotics.CANSparkMax.IdleMode;
 import com.revrobotics.CANSparkMaxLowLevel.MotorType;
 import com.revrobotics.SparkMaxAbsoluteEncoder.Type;
 import frc.robot.Util;
 import edu.wpi.first.math.MathUtil;
+import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.math.kinematics.ChassisSpeeds;
+import edu.wpi.first.math.kinematics.SwerveDriveKinematics;
+import edu.wpi.first.math.kinematics.SwerveModuleState;
+import edu.wpi.first.math.util.Units;
+import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.RunCommand;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 
 public class SwerveDriveTrain implements Subsystem {
 
-    public static double WHEEL_BASE_INCHES = 18;
-    public static double TRACK_WIDTH_INCHES = 24;
+    public static final double WHEEL_BASE_INCHES = 18;
+    public static final double WHEEL_BASE_METERS = Units.inchesToMeters(WHEEL_BASE_INCHES);
+    public static final double TRACK_WIDTH_INCHES = 24;
+    public static final double TRACK_WIDTH_METERS = Units.inchesToMeters(TRACK_WIDTH_INCHES);
+
+    // 0, 1, 2, 3 following quadrant numbering (CCW, starting NE)
+    public static final SwerveDriveKinematics kinematics = new SwerveDriveKinematics(
+            new Translation2d(TRACK_WIDTH_METERS / 2, WHEEL_BASE_METERS / 2),
+            new Translation2d(-TRACK_WIDTH_METERS / 2, WHEEL_BASE_METERS / 2),
+            new Translation2d(-TRACK_WIDTH_METERS / 2, -WHEEL_BASE_METERS / 2),
+            new Translation2d(TRACK_WIDTH_METERS / 2, -WHEEL_BASE_METERS / 2));
 
     // From https://www.revrobotics.com/rev-21-3005/
     // Reductions are always measured as turns-in/turns-out
-    public static double STEERING_MOTOR_REDUCTION = 9424.0 / 203.0;
-    public static double DRIVE_MOTOR_PINION_TEETH = 12;
+    public static final double STEERING_MOTOR_REDUCTION = 9424.0 / 203.0;
+    public static final double DRIVE_MOTOR_PINION_TEETH = 14;
     // Spot check - with a 12 tooth pinion this is ~5.5:1, as stated by the docs
-    public static double DRIVE_MOTOR_REDUCTION = (22.0 / DRIVE_MOTOR_PINION_TEETH) * (45.0 / 15.0);
-    public static double DRIVE_WHEEL_DIAMETER_INCHES = 3;
-    public static double DRIVE_WHEEL_CIRCUMFRENCE_INCHES = DRIVE_WHEEL_DIAMETER_INCHES * Math.PI;
+    public static final double DRIVE_MOTOR_REDUCTION = (22.0 / DRIVE_MOTOR_PINION_TEETH) * (45.0 / 15.0);
+    public static final double DRIVE_WHEEL_DIAMETER_INCHES = 3;
+    public static final double DRIVE_WHEEL_CIRCUMFRENCE_INCHES = DRIVE_WHEEL_DIAMETER_INCHES * Math.PI;
+    public static final double DRIVE_WHEEL_CIRCUMFRENCE_METERS = Units.inchesToMeters(DRIVE_WHEEL_CIRCUMFRENCE_INCHES);
 
-    public static double L = WHEEL_BASE_INCHES / 2;
-    public static double W = TRACK_WIDTH_INCHES / 2;
-    public static double R = Math.sqrt(L * L + W * W);
+    // Spec is 15.76 ft/s on a 14t pinion, derated slightly
+    public static final double DRIVE_MAX_VELOCITY_METERS_PER_SECOND = Units.feetToMeters(15);
 
-    private final CANSparkMax FLDrive, FLSteer;
-    private final CANSparkMax FRDrive, FRSteer;
-    private final CANSparkMax RLDrive, RLSteer;
-    private final CANSparkMax RRDrive, RRSteer;
+    // Just a guess since I can't find supporting documentation - we should only
+    // ever be commanding 90 degree rotation and we should be able to do that in
+    // ~200ms
+    public static final double MODULE_MAX_SLEW_PER_SECOND = (Math.PI / 2) / 0.2;
+    public static final double SERVICE_DT = 0.02;
 
-    private double fwd, str, rcw;
+    private static final class Module {
+        private final CANSparkMax drive, steer;
+        private SwerveModuleState desired;
 
-    private CANSparkMax driveFactory(int deviceID, boolean motorInverted) {
-        var drive = new CANSparkMax(deviceID, MotorType.kBrushless);
-        Util.handleREVLibErr(drive.restoreFactoryDefaults());
-        drive.setInverted(motorInverted);
+        public Module(int driveID, int turnID, Rotation2d zeroOffset) {
+            drive = driveFactory(driveID, false);
+            steer = steerFactory(
+                    turnID,
+                    zeroOffset, true, false, false);
+            desired = getState();
+        }
 
-        // native units are Rotations, RPM
-        // we want Inches/ inches per second
-        var encoder = drive.getEncoder();
-        Util.handleREVLibErr(
-                encoder.setPositionConversionFactor(DRIVE_WHEEL_CIRCUMFRENCE_INCHES / DRIVE_MOTOR_REDUCTION));
-        Util.handleREVLibErr(encoder.setVelocityConversionFactor(encoder.getPositionConversionFactor() / 60));
+        private static CANSparkMax driveFactory(int deviceID, boolean motorInverted) {
+            var drive = new CANSparkMax(deviceID, MotorType.kBrushless);
+            Util.handleREVLibErr(drive.restoreFactoryDefaults());
+            Util.handleREVLibErr(drive.setIdleMode(IdleMode.kBrake));
+            Util.handleREVLibErr(drive.enableVoltageCompensation(12));
 
-        return drive;
+            // WPILib setInverted doesn't allow returning an error :'(
+            drive.setInverted(motorInverted);
+            Util.handleREVLibErr(drive.getLastError());
+
+            // native units are Rotations, RPM
+            // we want meters/ meters per second
+            var encoder = drive.getEncoder();
+            Util.handleREVLibErr(
+                    encoder.setPositionConversionFactor(DRIVE_WHEEL_CIRCUMFRENCE_METERS / DRIVE_MOTOR_REDUCTION));
+            Util.handleREVLibErr(encoder.setVelocityConversionFactor(encoder.getPositionConversionFactor() / 60));
+
+            var controller = drive.getPIDController();
+            Util.handleREVLibErr(controller.setFeedbackDevice(encoder));
+            // In units of output fraction [-1, 1] per m/s of setpoint
+            Util.handleREVLibErr(controller.setFF(.2));
+            // In units of output fraction [-1, 1] per m/s of error
+            Util.handleREVLibErr(controller.setP(.01));
+
+            return drive;
+        }
+
+        private static CANSparkMax steerFactory(int deviceID, Rotation2d zeroOffset, boolean headingEncoderInverted,
+                boolean relativeEncoderInverted, boolean motorInverted) {
+            var steer = new CANSparkMax(deviceID, MotorType.kBrushless);
+            Util.handleREVLibErr(steer.restoreFactoryDefaults());
+            Util.handleREVLibErr(steer.setIdleMode(IdleMode.kBrake));
+            Util.handleREVLibErr(steer.enableVoltageCompensation(12));
+
+            // WPILib setInverted doesn't allow returning an error :'(
+            steer.setInverted(motorInverted);
+            Util.handleREVLibErr(steer.getLastError());
+
+            // Assume NEO550, don't smoke the poor motor
+            Util.handleREVLibErr(steer.setSmartCurrentLimit(20));
+
+            // The duty cycle encoder's native units are [0, 1) rotations
+            // We want to scale to radians, then apply the known radian offset,
+            // then seed the relative encoder.
+            var heading_encoder = steer.getAbsoluteEncoder(Type.kDutyCycle);
+            // Rotations -> radians, RPM -> radians per second
+            Util.handleREVLibErr(heading_encoder.setPositionConversionFactor(2 * Math.PI));
+            Util.handleREVLibErr(
+                    heading_encoder.setVelocityConversionFactor(heading_encoder.getPositionConversionFactor() / 60));
+            Util.handleREVLibErr(heading_encoder.setInverted(headingEncoderInverted));
+
+            // Each module has its own zero offset:
+            // if we're passed a zero offset of -pi/2, wrap that to 3pi/2.
+            // if passed an offset of 5pi/2, wrap to pi/2
+            var wrappedZeroOffset = MathUtil.angleModulus(zeroOffset.getRadians());
+            Util.handleREVLibErr(heading_encoder.setZeroOffset(wrappedZeroOffset));
+
+            // The duty cycle encoder now reports the heading of the module in
+            // range [0, 2pi)
+            // angleModulus allows us to convert that to [-pi, pi), with 0 still
+            // as "north"
+            var true_heading = MathUtil.angleModulus(heading_encoder.getPosition());
+
+            // We use the absolute encoder for seeding but the relative encoder for control:
+            // - this allows us to survive the absolute encoder becoming unplugged during
+            // the match,
+            // - as well as have higher control resolution (1024 CPR on the absolute
+            // encoder, 42*STEERING_MOTOR_REDUCTION ~=1949 CPR for the relative)
+            // - the relative encoder is able to report negative readings w/o us needing to
+            // do any trickery here
+            // - This approach may introduce backlash concerns, but we'll leave that for
+            // experimental determination
+            var motor_encoder = steer.getEncoder();
+            Util.handleREVLibErr(motor_encoder.setInverted(relativeEncoderInverted));
+            // Rotations -> radians, RPM -> radians per second
+            Util.handleREVLibErr(motor_encoder.setPositionConversionFactor(2 * Math.PI / STEERING_MOTOR_REDUCTION));
+            Util.handleREVLibErr(
+                    motor_encoder.setVelocityConversionFactor(motor_encoder.getPositionConversionFactor() / 60));
+
+            // Seed the relative encoder with the true heading
+            Util.handleREVLibErr(motor_encoder.setPosition(true_heading));
+
+            // Configire PID
+            var controller = steer.getPIDController();
+            Util.handleREVLibErr(controller.setFeedbackDevice(motor_encoder));
+            Util.handleREVLibErr(controller.setPositionPIDWrappingEnabled(true));
+            Util.handleREVLibErr(controller.setPositionPIDWrappingMinInput(-Math.PI));
+            Util.handleREVLibErr(controller.setPositionPIDWrappingMaxInput(Math.PI));
+
+            // In units of output fraction [-1, 1] per radian of error
+            Util.handleREVLibErr(controller.setP(1));
+            // In units of output fraction [-1, 1] per radian of error per millisecond
+            Util.handleREVLibErr(controller.setD(.001));
+
+            // Enable the controller
+            Util.handleREVLibErr(controller.setReference(motor_encoder.getPosition(), ControlType.kPosition));
+
+            return steer;
+        }
+
+        public Rotation2d getRotation2d() {
+            return new Rotation2d(steer.getEncoder().getPosition());
+        }
+
+        public SwerveModuleState getState() {
+            return new SwerveModuleState(
+                    drive.getEncoder().getVelocity(),
+                    getRotation2d());
+        }
+
+        public void setDesiredState(SwerveModuleState desired) {
+            this.desired = desired;
+        }
+
+        /**
+         * Like setDesiredState but doesn't rotate if the desired velocity is 0
+         *
+         * @param desired
+         */
+        public void setDesiredStatePersistAngle(SwerveModuleState desired) {
+            if (desired.speedMetersPerSecond == 0) {
+                desired.angle = getRotation2d();
+            }
+            setDesiredState(desired);
+        }
+
+        public SwerveModuleState getDesiredState() {
+            return this.desired;
+        }
+
+        public void service() {
+            var currentRotation = getRotation2d();
+            // Assumption here - all "equivalent" states are actually equivalent
+            // for our purposes. Lift this optimize call if that's not true
+            var optimized = SwerveModuleState.optimize(desired, currentRotation);
+            var rotationDelta = optimized.angle.minus(currentRotation);
+
+            // Do a little baby motion profile by figuring out how long it
+            // should take us to do this rotation and moving one timestep along
+            // that line. When DT > timeToComplete, we'll go all the way to the end
+            // e.x. rotation change of pi/4 can happen in 200ms
+            var timeToCompleteSeconds = rotationDelta.getRadians() / MODULE_MAX_SLEW_PER_SECOND;
+            var limitedSlewRotation = currentRotation.interpolate(
+                    optimized.angle,
+                    // TODO - it might be wise to not assume a constant timestep
+                    MathUtil.clamp(SERVICE_DT / timeToCompleteSeconds, 0, 1));
+
+            Util.handleREVLibErr(
+                    drive.getPIDController().setReference(desired.speedMetersPerSecond, ControlType.kVelocity));
+            Util.handleREVLibErr(
+                    steer.getPIDController().setReference(limitedSlewRotation.getRadians(), ControlType.kPosition));
+        }
     }
 
-    private CANSparkMax steerFactory(int deviceID, double zeroOffset, boolean headingEncoderInverted,
-            boolean relativeEncoderInverted, boolean motorInverted) {
-        var steer = new CANSparkMax(deviceID, MotorType.kBrushless);
-        Util.handleREVLibErr(steer.restoreFactoryDefaults());
-
-        steer.setInverted(motorInverted);
-        // Assume NEO550, don't smoke the poor motor
-        Util.handleREVLibErr(steer.setSmartCurrentLimit(30));
-
-        // The duty cycle encoder's native units are [0, 1) rotations
-        // We want to scale to degrees, then apply the known degree offset, then seed
-        // the relative encoder.
-        var heading_encoder = steer.getAbsoluteEncoder(Type.kDutyCycle);
-        // Rotations -> degrees, RPM -> degrees per second
-        Util.handleREVLibErr(heading_encoder.setPositionConversionFactor(1 / 360.0));
-        Util.handleREVLibErr(
-                heading_encoder.setVelocityConversionFactor(heading_encoder.getPositionConversionFactor() / 60));
-        Util.handleREVLibErr(heading_encoder.setInverted(headingEncoderInverted));
-
-        // Each module has its own zero offset:
-        // if we're passed a zero offset of -90, wrap that to 270.
-        // if passed an offset of 450, wrap to +90
-        var wrappedZeroOffset = MathUtil.inputModulus(zeroOffset, 0, 360);
-        Util.handleREVLibErr(heading_encoder.setZeroOffset(wrappedZeroOffset));
-
-        // The duty cycle encoder now reports the heading of the module in range [0,
-        // 360)
-        // inputModulus allows us to convert that to [-180, 180), with 0 still as
-        // "north"
-        var true_heading = MathUtil.inputModulus(heading_encoder.getPosition(), -180, 180);
-
-        // We use the absolute encoder for seeding but the relative encoder for control:
-        // - this allows us to survive the absolute encoder becoming unplugged during
-        // the match,
-        // - as well as have higher control resolution (1024 CPR on the absolute
-        // encoder, 42*STEERING_MOTOR_REDUCTION ~=1949 CPR for the relative)
-        // - the relative encoder is able to report negative readings w/o us needing to
-        // do any trickery here
-        // - This approach may introduce backlash concerns, but we'll leave that for
-        // experimental determination
-        var motor_encoder = steer.getEncoder();
-        Util.handleREVLibErr(motor_encoder.setInverted(relativeEncoderInverted));
-        // Rotations -> degrees, RPM -> degrees per second
-        Util.handleREVLibErr(motor_encoder.setPositionConversionFactor(1 / (360.0 * STEERING_MOTOR_REDUCTION)));
-        Util.handleREVLibErr(
-                motor_encoder.setVelocityConversionFactor(motor_encoder.getPositionConversionFactor() / 60));
-
-        // Seed the relative encoder with the true heading
-        Util.handleREVLibErr(motor_encoder.setPosition(true_heading));
-
-        // Configire PID
-        var controller = steer.getPIDController();
-        Util.handleREVLibErr(controller.setFeedbackDevice(motor_encoder));
-        Util.handleREVLibErr(controller.setPositionPIDWrappingEnabled(true));
-        Util.handleREVLibErr(controller.setPositionPIDWrappingMinInput(-180));
-        Util.handleREVLibErr(controller.setPositionPIDWrappingMaxInput(180));
-        // In units of output fraction [-1, 1] per degree of error
-        Util.handleREVLibErr(controller.setP(0.05));
-        // Enable the controller
-        Util.handleREVLibErr(controller.setReference(motor_encoder.getPosition(), ControlType.kPosition));
-
-        return steer;
-    }
+    private final Module module1, module2, module3, module4;
 
     public SwerveDriveTrain() {
         /*
          * The zeroing jig provided with MaxSwerve orients each module to:
-         * 
+         *
          * |------------|
          * |----....^...|
          * .....\...|...|
          * ......\..|...|
          * .......\.....|
          * ........\----|
-         * 
+         *
          * Where the arrow indicates the wheel direction.
          * When applied to all 4 modules though, this gives:
-         * - FL facing west
-         * - FR facing north
-         * - RL facing south
-         * - RR facing east
-         * 
+         * - Module 1 facing north
+         * - Module 2 facing west
+         * - Module 3 facing south
+         * - Module 4 facing east
+         *
          * Our constants for each module are captured from the use of the jig,
          * then we apply offsets to get them to face north
          */
-        // TODO: capture from REV Client, move to constants class
 
-        double FLZeroOffsetDegrees = 0;
-        double FRZeroOffsetDegrees = 0;
-        double RLZeroOffsetDegrees = 0;
-        double RRZeroOffsetDegrees = 0;
+        module1 = new Module(31, 32,
+                Rotation2d.fromRotations(0.932).plus(new Rotation2d(0)));
+        module2 = new Module(11, 12,
+                Rotation2d.fromRotations(0.359).plus(new Rotation2d(Math.PI / 2)));
+        module3 = new Module(21, 22,
+                Rotation2d.fromRotations(0.517).plus(new Rotation2d(Math.PI)));
+        module4 = new Module(41, 42,
+                Rotation2d.fromRotations(0.575).plus(new Rotation2d(-Math.PI / 2)));
 
-        FLDrive = driveFactory(0, false);
-        FLSteer = steerFactory(
-                1,
-                FLZeroOffsetDegrees + 90,
-                false,
-                false,
-                false);
-        FRDrive = driveFactory(2,
-                false);
-        FRSteer = steerFactory(
-                3,
-                FRZeroOffsetDegrees + 0,
-                false,
-                false,
-                false);
-        RLDrive = driveFactory(4,
-                false);
-        RLSteer = steerFactory(
-                5,
-                RLZeroOffsetDegrees + 180,
-                false,
-                false,
-                false);
-        RRDrive = driveFactory(6,
-                false);
-        RRSteer = steerFactory(
-                7,
-                RRZeroOffsetDegrees + 270,
-                false,
-                false,
-                false);
-    }
-
-    // TODO: Should this be implemented as a command factory?
-    public void setDesired(double fwd, double str, double rcw) {
-        this.fwd = fwd;
-        this.str = str;
-        this.rcw = rcw;
     }
 
     public void periodic() {
-        // When the robot is all width, L = 0, W = R -> rcw points straight back
-        var rcw_fwd = rcw * (W / R);
-        // When the robot is all length, L = R, W = 0 -> rcw points straight right
-        var rcw_str = rcw * (L / R);
+        module1.service();
+        module2.service();
+        module3.service();
+        module4.service();
+    }
 
-        // Front Left
-        var fl_fwd = fwd + rcw_fwd;
-        var fl_str = str + rcw_str;
-        // Assumes instantaneous angle correction - may cause lurch in wrong direction
-        var fl_speed = Math.sqrt(fl_fwd * fl_fwd + fl_str * fl_str);
-        var fl_angle = Math.toDegrees(Math.atan2(fl_str, fl_fwd));
-        // Front Right
-        var fr_fwd = fwd - rcw_fwd;
-        var fr_str = str + rcw_str;
-        // Assumes instantaneous angle correction - may cause lurch in wrong direction
-        var fr_speed = Math.sqrt(fr_fwd * fr_fwd + fr_str * fr_str);
-        var fr_angle = Math.toDegrees(Math.atan2(fr_str, fr_fwd));
-        // Rear Left
-        var rl_fwd = fwd + rcw_fwd;
-        var rl_str = str - rcw_str;
-        // Assumes instantaneous angle correction - may cause lurch in wrong direction
-        var rl_speed = Math.sqrt(rl_fwd * rl_fwd + rl_str * rl_str);
-        var rl_angle = Math.toDegrees(Math.atan2(rl_str, rl_fwd));
-        // Rear Right
-        var rr_fwd = fwd - rcw_fwd;
-        var rr_str = str - rcw_str;
-        // Assumes instantaneous angle correction - may cause lurch in wrong direction
-        var rr_speed = Math.sqrt(rr_fwd * rr_fwd + rr_str * rr_str);
-        var rr_angle = Math.toDegrees(Math.atan2(rr_str, rr_fwd));
+    public Command X() {
+        return new RunCommand(() -> {
+            module1.setDesiredState(new SwerveModuleState(0, new Rotation2d(-Math.PI / 4)));
+            module2.setDesiredState(new SwerveModuleState(0, new Rotation2d(+Math.PI / 4)));
+            module3.setDesiredState(new SwerveModuleState(0, new Rotation2d(-Math.PI / 4)));
+            module4.setDesiredState(new SwerveModuleState(0, new Rotation2d(+Math.PI / 4)));
+        }, this);
+    }
 
-        var max_output = List.of(fl_speed, fr_speed, rl_speed, rr_speed).stream().max((a, b) -> (int) (a - b))
-                .orElse(1.0);
-        if (max_output > 1) {
-            fl_speed /= max_output;
-            fr_speed /= max_output;
-            rl_speed /= max_output;
-            rr_speed /= max_output;
-        }
+    public Command Zero() {
+        return new RunCommand(() -> {
+            module1.setDesiredState(new SwerveModuleState(0, new Rotation2d(0)));
+            module2.setDesiredState(new SwerveModuleState(0, new Rotation2d(0)));
+            module3.setDesiredState(new SwerveModuleState(0, new Rotation2d(0)));
+            module4.setDesiredState(new SwerveModuleState(0, new Rotation2d(0)));
+        }, this);
+    }
 
-        // Use this incredibly long formulation of setting duty cycle so that we can see
-        // errors from the sparkmaxen
-        Util.handleREVLibErr(FLDrive.getPIDController().setReference(fl_speed, ControlType.kDutyCycle));
-        Util.handleREVLibErr(FRDrive.getPIDController().setReference(fr_speed, ControlType.kDutyCycle));
-        Util.handleREVLibErr(RLDrive.getPIDController().setReference(rl_speed, ControlType.kDutyCycle));
-        Util.handleREVLibErr(RRDrive.getPIDController().setReference(rr_speed, ControlType.kDutyCycle));
-
-        // Don't change steering angle when computed speed is 0 - Math.atan2 will
-        // snap the angle back to 0 when both inputs are zero. Some people prefer to
-        // employ this logic when commanded drive speed is close to zero, I'm of the
-        // thought that deadbanding should happen on the input side only, not output.
-        if (fl_speed == 0) {
-            fl_angle = FLSteer.getEncoder().getPosition();
-        }
-        if (fr_speed == 0) {
-            fr_angle = FRSteer.getEncoder().getPosition();
-        }
-        if (rl_speed == 0) {
-            rl_angle = RLSteer.getEncoder().getPosition();
-        }
-        if (rr_speed == 0) {
-            rr_angle = RRSteer.getEncoder().getPosition();
-        }
-
-        // TODO - implement wraparound to minimize wheel direction changes
-        Util.handleREVLibErr(FLSteer.getPIDController().setReference(fl_angle, ControlType.kPosition));
-        Util.handleREVLibErr(FRSteer.getPIDController().setReference(fr_angle, ControlType.kPosition));
-        Util.handleREVLibErr(RLSteer.getPIDController().setReference(rl_angle, ControlType.kPosition));
-        Util.handleREVLibErr(RRSteer.getPIDController().setReference(rr_angle, ControlType.kPosition));
+    public Command DriveRelative(Supplier<ChassisSpeeds> s) {
+        return new RunCommand(() -> {
+            var states = kinematics.toSwerveModuleStates(s.get());
+            SwerveDriveKinematics.desaturateWheelSpeeds(states, DRIVE_MAX_VELOCITY_METERS_PER_SECOND);
+            // TODO: 2nd order kinematics to prevent drift while rotating
+            module1.setDesiredStatePersistAngle(states[0]);
+            module2.setDesiredStatePersistAngle(states[1]);
+            module3.setDesiredStatePersistAngle(states[2]);
+            module4.setDesiredStatePersistAngle(states[3]);
+        }, this);
     }
 }

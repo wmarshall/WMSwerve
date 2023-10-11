@@ -5,9 +5,10 @@
 package frc.robot;
 
 import frc.robot.subsystems.SwerveDriveTrain;
+import edu.wpi.first.math.MathUtil;
+import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.wpilibj.Joystick;
 import edu.wpi.first.wpilibj2.command.Command;
-import edu.wpi.first.wpilibj2.command.RunCommand;
 
 /**
  * This class is where the bulk of the robot should be declared. Since
@@ -33,13 +34,19 @@ public class RobotContainer {
     configureBindings();
   }
 
-  
   private void configureBindings() {
 
-    // TODO - inversions are all messed up
-    // TODO - make this a command factory in the subsystem itself
     driveTrain.setDefaultCommand(
-        new RunCommand(() -> driveTrain.setDesired(joy.getY(), joy.getX(), joy.getRawAxis(4)), driveTrain));
+        driveTrain.DriveRelative(() -> {
+          var fwd = MathUtil.applyDeadband(-joy.getY(), 0.1);
+          fwd = fwd * fwd * fwd;
+          var str = MathUtil.applyDeadband(joy.getX(), 0.1);
+          str = str * str * str;
+          return new ChassisSpeeds(
+              SwerveDriveTrain.DRIVE_MAX_VELOCITY_METERS_PER_SECOND * fwd,
+              SwerveDriveTrain.DRIVE_MAX_VELOCITY_METERS_PER_SECOND * str,
+              0);
+        }));
   }
 
   /**
