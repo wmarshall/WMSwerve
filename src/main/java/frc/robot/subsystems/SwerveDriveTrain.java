@@ -46,6 +46,9 @@ public class SwerveDriveTrain implements Subsystem {
     // Spec is 15.76 ft/s on a 14t pinion, derated slightly
     public static final double DRIVE_MAX_VELOCITY_METERS_PER_SECOND = Units.feetToMeters(15);
 
+    // Just a guess
+    public static final double DRIVE_MAX_OMEGA_RADIANS_PER_SECOND = Math.PI;
+
     // Just a guess since I can't find supporting documentation - we should only
     // ever be commanding 90 degree rotation and we should be able to do that in
     // ~200ms
@@ -280,9 +283,11 @@ public class SwerveDriveTrain implements Subsystem {
 
     public Command DriveRelative(Supplier<ChassisSpeeds> s) {
         return new RunCommand(() -> {
-            var states = kinematics.toSwerveModuleStates(s.get());
+            var speeds = s.get();
+            var discreteSpeeds = ChassisSpeeds.discretize(speeds, SERVICE_DT);
+
+            var states = kinematics.toSwerveModuleStates(discreteSpeeds);
             SwerveDriveKinematics.desaturateWheelSpeeds(states, DRIVE_MAX_VELOCITY_METERS_PER_SECOND);
-            // TODO: 2nd order kinematics to prevent drift while rotating
             module1.setDesiredStatePersistAngle(states[0]);
             module2.setDesiredStatePersistAngle(states[1]);
             module3.setDesiredStatePersistAngle(states[2]);
