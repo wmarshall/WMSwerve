@@ -46,6 +46,9 @@ public class SwerveDriveTrain implements Subsystem {
     // Spec is 15.76 ft/s on a 14t pinion, derated slightly
     public static final double DRIVE_MAX_VELOCITY_METERS_PER_SECOND = Units.feetToMeters(15);
 
+    // Just a guess
+    public static final double DRIVE_MAX_OMEGA_RADIANS_PER_SECOND = Math.PI;
+
     // Just a guess since I can't find supporting documentation - we should only
     // ever be commanding 90 degree rotation and we should be able to do that in
     // ~200ms
