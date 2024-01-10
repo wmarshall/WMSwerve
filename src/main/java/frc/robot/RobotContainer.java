@@ -51,11 +51,18 @@ public class RobotContainer {
 
           desiredHeading = desiredHeading.plus(Rotation2d.fromRadians(maxHeadingChange * rotRatePct));
 
-        return ChassisSpeeds.fromFieldRelativeSpeeds(
-              SwerveDriveTrain.DRIVE_MAX_VELOCITY_METERS_PER_SECOND * fwd,
-              SwerveDriveTrain.DRIVE_MAX_VELOCITY_METERS_PER_SECOND * str,
-              rotationController.calculate(imu.getAngle(), desiredHeading.getRadians()),
-              Rotation2d.fromDegrees(imu.getAngle()));
+          var fieldRelativeVx = SwerveDriveTrain.DRIVE_MAX_VELOCITY_METERS_PER_SECOND * fwd;
+          var fieldRelativeVy = SwerveDriveTrain.DRIVE_MAX_VELOCITY_METERS_PER_SECOND * str;
+
+          var currentHeadingRadians = imu.getAngle();
+
+          var omegaRadiansPerSecond = rotationController.calculate(currentHeadingRadians, desiredHeading.getRadians());
+
+          return ChassisSpeeds.fromFieldRelativeSpeeds(
+              fieldRelativeVx,
+              fieldRelativeVy,
+              omegaRadiansPerSecond,
+              Rotation2d.fromRadians(currentHeadingRadians));
         }));
   }
 
