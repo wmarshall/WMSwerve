@@ -3,10 +3,10 @@ package frc.robot.subsystems;
 import java.util.function.Supplier;
 
 import com.revrobotics.CANSparkMax;
-import com.revrobotics.CANSparkMax.ControlType;
-import com.revrobotics.CANSparkMax.IdleMode;
-import com.revrobotics.CANSparkMaxLowLevel.MotorType;
-import com.revrobotics.SparkMaxAbsoluteEncoder.Type;
+import com.revrobotics.CANSparkBase.ControlType;
+import com.revrobotics.CANSparkBase.IdleMode;
+import com.revrobotics.CANSparkLowLevel.MotorType;
+import com.revrobotics.SparkAbsoluteEncoder.Type;
 import frc.robot.Util;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Rotation2d;
@@ -204,7 +204,7 @@ public class SwerveDriveTrain implements Subsystem {
             // Do a little baby motion profile by figuring out how long it
             // should take us to do this rotation and moving one timestep along
             // that line. When DT > timeToComplete, we'll go all the way to the end
-            // e.x. rotation change of pi/4 can happen in 200ms
+            // e.x. rotation change of pi/2 can happen in 200ms
             var timeToCompleteSeconds = rotationDelta.getRadians() / MODULE_MAX_SLEW_PER_SECOND;
             var limitedSlewRotation = currentRotation.interpolate(
                     optimized.angle,
