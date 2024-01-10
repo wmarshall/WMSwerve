@@ -283,9 +283,11 @@ public class SwerveDriveTrain implements Subsystem {
 
     public Command DriveRelative(Supplier<ChassisSpeeds> s) {
         return new RunCommand(() -> {
-            var states = kinematics.toSwerveModuleStates(s.get());
+            var speeds = s.get();
+            var discreteSpeeds = ChassisSpeeds.discretize(speeds, SERVICE_DT);
+
+            var states = kinematics.toSwerveModuleStates(discreteSpeeds);
             SwerveDriveKinematics.desaturateWheelSpeeds(states, DRIVE_MAX_VELOCITY_METERS_PER_SECOND);
-            // TODO: 2nd order kinematics to prevent drift while rotating
             module1.setDesiredStatePersistAngle(states[0]);
             module2.setDesiredStatePersistAngle(states[1]);
             module3.setDesiredStatePersistAngle(states[2]);
